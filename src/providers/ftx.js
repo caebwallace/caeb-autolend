@@ -128,7 +128,7 @@ export class CaebFTXAutoLend {
                 const { lendSizeRatio, apyMin } = this.opts;
 
                 // Get env
-                const { lendable, coin, minRate } = m;
+                const { lendable, coin, minRate, locked } = m;
                 const { estimate: estimatedRate } = rates.find(k => k.coin === coin);
 
                 // Calculate the offer rate (take the market ones if better than our)
@@ -141,7 +141,7 @@ export class CaebFTXAutoLend {
                 }
 
                 // If lendable coins and rate is acceptable : call lending
-                if (lendable > 0 && rate > 0) {
+                if (lendable > locked && rate > 0) {
 
                     // Limit the size to 1% of the total lendable amount
                     const size = lendable * lendSizeRatio;
