@@ -46,3 +46,9 @@ APY_MIN=5
 # Ignore those assets from auto lending (seperated with a comma)
 IGNORE_ASSETS=FAKE,COIN
 ```
+
+TODO
+----
+
+- Add lending history.
+- Plug a private telegram bot to output actions.
