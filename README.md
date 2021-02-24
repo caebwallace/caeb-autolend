@@ -21,7 +21,8 @@ How to use
 Configuration
 -------------
 
-The default configuration is set to not working without changing config.
+**The default configuration is set to not working without changing config.**
+
 FTX API are of course concerned, but below you've the configuration to apply for invest ratio (INVEST_RATIO) and APY minimum (APY_MIN).
 
 - INVEST_RATIO : `1` means that 100% (0.1 -> 10%...) of the lending elligibles tokens will be lend.
