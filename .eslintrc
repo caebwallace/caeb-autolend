@@ -1,0 +1,94 @@
+{
+    "env": {
+        "browser": true,
+        "es2021": true,
+        "jest/globals": true
+    },
+    "plugins": [
+        "jest",
+        "jsdoc"
+    ],
+    "extends": [
+        "standard"
+    ],
+    "parserOptions": {
+        "ecmaVersion": 12,
+        "sourceType": "module"
+    },
+    "rules": {
+
+        // Jest
+        "jest/no-disabled-tests": "warn",
+        "jest/no-focused-tests": "error",
+        "jest/no-identical-title": "error",
+        "jest/prefer-to-have-length": "warn",
+        "jest/valid-expect": "error",
+
+        // JSDOC
+        "jsdoc/check-alignment": 1, // Recommended
+        // "jsdoc/check-examples": 1,
+        "jsdoc/check-indentation": 1,
+        "jsdoc/check-param-names": 1, // Recommended
+        "jsdoc/check-syntax": 1,
+        "jsdoc/check-tag-names": 1, // Recommended
+        "jsdoc/check-types": 1, // Recommended
+        "jsdoc/implements-on-classes": 1, // Recommended
+        "jsdoc/match-description": 1,
+        "jsdoc/newline-after-description": 1, // Recommended
+        "jsdoc/no-undefined-types": 1, // Recommended
+        "jsdoc/require-description": 1,
+        "jsdoc/require-description-complete-sentence": 1,
+        // "jsdoc/require-example": 1,
+        "jsdoc/require-hyphen-before-param-description": 1,
+        "jsdoc/require-jsdoc": 1, // Recommended
+        "jsdoc/require-param": 1, // Recommended
+        "jsdoc/require-param-description": 1, // Recommended
+        "jsdoc/require-param-name": 1, // Recommended
+        "jsdoc/require-param-type": 1, // Recommended
+        "jsdoc/require-returns": 1, // Recommended
+        "jsdoc/require-returns-check": 1, // Recommended
+        "jsdoc/require-returns-description": 1, // Recommended
+        "jsdoc/require-returns-type": 1, // Recommended
+        "jsdoc/valid-types": 1, // Recommended
+
+        // enable additional rules
+        "indent": [
+            "error",
+            4
+        ],
+        "padded-blocks": [
+            "error",
+            {
+                "classes": "always",
+                "switches": "always"
+            }
+        ],
+        "linebreak-style": [
+            "error",
+            "unix"
+        ],
+        "brace-style": [
+            "error",
+            "stroustrup"
+        ],
+        "quotes": [
+            "error",
+            "single"
+        ],
+        "semi": [
+            "error",
+            "always"
+        ],
+        // override default options for rules from base configurations
+        "comma-dangle": [
+            "error",
+            "always-multiline"
+        ],
+        "no-cond-assign": [
+            "error",
+            "always"
+        ],
+        // disable rules from base configurations
+        "no-console": "off"
+    }
+}
