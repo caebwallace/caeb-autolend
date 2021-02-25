@@ -55,7 +55,7 @@ APY_MIN=5
 # Set the APY% manually (disable APY_MIN)
 APY_MANUAL_FIXED=
 
-# The reduction % compared to the estimated one (to be sure to choosed)
+# The reduction % compared to the estimated one (to be sure to be choosed)
 APY_OFFER_DISCOUNT=0
 
 # Ignore those assets from auto lending (seperated with a comma)
