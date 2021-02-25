@@ -132,7 +132,7 @@ export class CaebFTXAutoLend {
                 const { estimate: estimatedRate } = rates.find(k => k.coin === coin);
 
                 // Calculate the offer rate (take the market ones if better than our)
-                const rate = Math.max(minRate, estimatedRate);
+                const rate = Math.max(minRate, estimatedRate) * (1 - ENV.APY_OFFER_DISCOUNT / 100);
 
                 // Reject if above APY min
                 if (lendable > 0 && this.getAPY(rate) < (apyMin / 100)) {

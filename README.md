@@ -54,6 +54,9 @@ APY_MIN=5
 
 # Ignore those assets from auto lending (seperated with a comma)
 IGNORE_ASSETS=FAKE,COIN
+
+# The reduction % compared to the estimated one (to be sure to choosed)
+APY_OFFER_DISCOUNT=0
 ```
 
 Running with Docker
