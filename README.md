@@ -12,11 +12,19 @@ So I took my favorite IDE to code that.
 How to use
 ----------
 
+With nodeJS :
+
  - You need Nod1JS (a decent version > 10.0).
  - You copy the file `.env.defaults` to `.env` and configure your accounts.
  - You customize your FTX API keys in `.env`
  - Install dependencies with `npm install`
  - Start it with `npm start`
+
+ With Docker :
+
+ - Install Docker (or Docker Desktop, anything that can run a docker image).
+ - To to 'Running with Docker' to build and run the image.
+
 
 Configuration
 -------------
