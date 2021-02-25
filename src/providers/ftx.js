@@ -178,6 +178,7 @@ export class CaebFTXAutoLend {
         list.forEach(k => {
             k.minRate = roundTo(this.getAPY(k.minRate) * 100);
             k.lockedRatio = roundTo(k.locked * 100 / k.lendable);
+            k.lendedRatio = roundTo((k.locked - k.offered) * 100 / k.locked);
             this.log.debug(JSON.stringify(k));
         });
 
