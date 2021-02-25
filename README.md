@@ -52,11 +52,14 @@ INVEST_RATIO=1
 # The minimum of APY% asked
 APY_MIN=5
 
-# Ignore those assets from auto lending (seperated with a comma)
-IGNORE_ASSETS=FAKE,COIN
+# Set the APY% manually (disable APY_MIN)
+APY_MANUAL_FIXED=
 
 # The reduction % compared to the estimated one (to be sure to choosed)
 APY_OFFER_DISCOUNT=0
+
+# Ignore those assets from auto lending (seperated with a comma)
+IGNORE_ASSETS=FAKE,COIN
 ```
 
 Running with Docker

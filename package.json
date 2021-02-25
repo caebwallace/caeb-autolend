@@ -1,6 +1,6 @@
 {
   "name": "caeb-autolend",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "FTX Auto lending crypto hold in spot.",
   "main": "src/index.js",
   "scripts": {
