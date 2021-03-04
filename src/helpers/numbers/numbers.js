@@ -38,7 +38,8 @@ export function formatVariation (value, limits = { vibrate: DEFAULT_VIBRATING_LI
         classStyle = rawValue > 0 ? 'positive' : 'negative';
         if (Math.abs(rawValue) > warm) {
             classStyle += ' warm';
-        } else if (Math.abs(rawValue) > vibrate) {
+        }
+        else if (Math.abs(rawValue) > vibrate) {
             classStyle += ' vibrate';
         }
     }

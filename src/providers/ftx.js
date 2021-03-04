@@ -1,7 +1,8 @@
 import FTXRest from 'ftx-api-rest';
 import ENV from '../helpers/env/env.js';
 import { Logger } from '../helpers/logger/logger.js';
-import { roundTo } from '@helpers/numbers/numbers.js';
+import { roundTo, countDecimals } from '@helpers/numbers/numbers.js';
+import { convertHPYtoAPY, convertAPYtoHPY, applyRateDiscount } from '../helpers/yield/convert.js';
 
 /**
  * FTX Auto lending tokens in spot.
@@ -31,6 +32,13 @@ export class CaebFTXAutoLend {
             // Assets to ignore
             ignoreAssets: [],
 
+            // Fiat assets
+            fiatAssets: ['USD', 'USDT'],
+
+            // Min available value in USD
+            minAvailableLimitUSD: 0.1,
+            lendPricePrecision: 8,
+
         }, _opts);
 
         // Local logging
@@ -50,6 +58,24 @@ export class CaebFTXAutoLend {
             secret: apiSecret,
             subaccount: subaccountId,
         });
+    }
+
+    /**
+     * Returns all market exchange informations.
+     *
+     * @returns {Array} - The markets pairs and contracts.
+     */
+    async getMarkets () {
+
+        // Build the request
+        const { result } = await this.api().request({
+            method: 'GET',
+            path: '/markets',
+        });
+
+        // Returns results
+        return result;
+
     }
 
     /**
@@ -107,6 +133,53 @@ export class CaebFTXAutoLend {
     }
 
     /**
+     * Returns lending history.
+     *
+     * @returns {Array} - The lending history.
+     */
+    async getLendingHistory () {
+
+        // Build the request
+        const { result } = await this.api().request({
+            method: 'GET',
+            path: '/spot_margin/lending_history',
+        });
+
+        // Returns results
+        return result;
+
+    }
+
+    /**
+     * Post a lending offer.
+     *
+     * @param {object} data - The offer to submit.
+     */
+    async submitLendingOffer (data) {
+
+        // Do it (commented for now)
+        try {
+
+            const { coin, size, rate } = data;
+
+            // Submit the offer
+            await this.api().request({
+                method: 'POST',
+                path: '/spot_margin/offers',
+                data,
+            });
+
+            // Log it
+            this.log.info(`ADD LENDING -> ${size} [${coin}] (APY : ${roundTo(convertHPYtoAPY(rate) * 100)}%)`);
+        }
+
+        // Catch errors
+        catch (err) {
+            this.log.error(err, data);
+        }
+    }
+
+    /**
      * Autolend coins.
      *
      * @param {Array} ignoreAssets - The list of assets to ignore (default: none).
@@ -116,102 +189,142 @@ export class CaebFTXAutoLend {
         // Get balances
         const rates = await this.getLendingRates();
         const balances = (await this.getLendingBalances()).filter(k => ignoreAssets.indexOf(k.coin) < 0);
+        const history = await this.getLendingHistory();
+        const markets = await this.getMarkets();
+
+        // Get invest ratio for each call
+        const { lendSizeRatio, apyMin, minAvailableLimitUSD, lendPricePrecision } = this.opts;
 
         // Log
         this.log.info('Ask for autolending assets...');
 
         // Loop over each lendable coins and post an offer
         if (balances && balances.length) {
-            await Promise.all(balances.map(async (m) => {
+            for (let i = 0; i < balances.length; i++) {
 
-                // Get invest ratio for each call
-                const { lendSizeRatio, apyMin } = this.opts;
+                // Get the balance
+                const m = balances[i];
 
                 // Get env
                 const { lendable, coin, minRate, locked } = m;
                 const { estimate: estimatedRate } = rates.find(k => k.coin === coin);
+                const offerDiscount = ENV.APY_OFFER_DISCOUNT || 0;
+
+                // Get asset
+                const asset = this.getMarketsAsset(markets, coin);
+
+                // Get available value to lend
+                const available = lendable - locked;
+                const availableUSD = available * asset.price;
 
                 // Calculate the offer rate (take the market ones if better than our)
-                const rate = ENV.APY_MANUAL_FIXED ? ENV.APY_MANUAL_FIXED / 100 / 365.2422 / 24 : Math.max(minRate, estimatedRate) * (1 - ENV.APY_OFFER_DISCOUNT / 100);
+                const HPY = ENV.APY_MANUAL_FIXED ? convertAPYtoHPY(ENV.APY_MANUAL_FIXED / 100) : applyRateDiscount(estimatedRate, offerDiscount);
+                const APY = convertHPYtoAPY(HPY);
 
                 // Reject if above APY min
-                if (!ENV.APY_MANUAL_FIXED && lendable > 0 && this.getAPY(rate) < (apyMin / 100)) {
-                    this.log.warn(`APY TOO LOW [${coin}] -> ${roundTo(this.getAPY(rate) * 100)}% < ${roundTo(apyMin)}%`);
+                if (!ENV.APY_MANUAL_FIXED && lendable > 0 && APY < (apyMin / 100)) {
+                    this.log.warn(`APY TOO LOW [${coin}] -> ${APY * 100} < ${roundTo(apyMin)}%`, estimatedRate, offerDiscount);
                     return;
                 }
 
                 // If lendable coins and rate is acceptable : call lending
-                if (lendable > locked && rate > 0) {
+                if (availableUSD >= minAvailableLimitUSD && HPY > 0) {
 
                     // Limit the size to 1% of the total lendable amount
-                    const size = lendable * lendSizeRatio;
+                    const size = roundTo(available * lendSizeRatio, lendPricePrecision);
 
                     // Build datas
-                    const data = { coin, size, rate };
+                    const data = { coin, size, rate: HPY };
 
                     // Do it (commented for now)
-                    try {
-
-                        // Submit the offer
-                        await this.api().request({
-                            method: 'POST',
-                            path: '/spot_margin/offers',
-                            data,
-                        });
-
-                        // Log it
-                        this.log.info(`ADD LENDING -> ${size} [${coin}] (APY : ${roundTo(this.getAPY(rate) * 100)}%)`);
-                    }
-
-                    // Catch errors
-                    catch (err) {
-                        this.log.error(err);
-                    }
+                    await this.submitLendingOffer(data);
 
                 }
 
-            }));
+                // Message if no things to lend
+                else {
+                    this.log.debug(`SIZE TOO LOW [${coin}] -> ${roundTo(availableUSD, lendPricePrecision)} USD < ${roundTo(minAvailableLimitUSD, lendPricePrecision)} USD`);
+                }
+            }
+
         }
 
         // Show a fresh list a coins
         const list = await this.getLendingBalances();
+        let totalValue = 0;
         list.forEach(k => {
-            k.minRate = roundTo(this.getAPY(k.minRate) * 100);
+
+            // Calculate some ratios
+            k.minRate = roundTo(convertHPYtoAPY(k.minRate) * 100);
             k.lockedRatio = roundTo(k.locked * 100 / k.lendable);
             k.lendedRatio = roundTo((k.locked - k.offered) * 100 / k.locked);
+
+            // Calculate the value in USD
+            const { coin } = k;
+            const { price } = this.getMarketsAsset(markets, coin);
+            k.value = k.locked * price;
+
+            // Accumulate to totalValue
+            totalValue += k.value;
+
+            // Show balances
             this.log.debug(JSON.stringify(k));
+
         });
 
+        // Debug history
+        const pnl = [];
+        let totalProfits = 0;
+        history.forEach(h => {
+
+            // Get infos
+            const { coin, rate: hpy, proceeds, time } = h;
+            const apy = roundTo(convertHPYtoAPY(hpy) * 100);
+
+            // Get coin price in $ (search for market price, use 1 for fiats)
+            const { price } = this.getMarketsAsset(markets, coin);
+
+            // Calculate the value
+            const amount = proceeds * price;
+
+            // Push to PNL
+            pnl.push({
+                coin,
+                amount,
+                apy,
+                time,
+            });
+
+            // increment total amount
+            totalProfits += amount;
+
+            // console.log(item, h, APY, history.length, price, profits, apy);
+        });
+        // this.log.debug('History', markets);
+
+        // Log profits
+        this.log.info(`Total lended : ${roundTo(totalValue, 3)} USD`);
+        this.log.info(`Total profits : ${roundTo(totalProfits, 3)} USD (${roundTo(totalProfits * 100 / totalValue, 4)}%) - History : ${history.length}`);
+
     }
 
     /**
-     * Convert hourly interests rate to daily.
+     * Search for an asset in the market.
      *
-     * @param {number} rate - The hourly rate.
-     * @returns {number} - The daily rate.
+     * @param {Array} markets - The listed markets.
+     * @param {string} coin - The coin to find.
+     * @returns {object} - The market asset if found.
      */
-    getAPD (rate) {
-        return rate * 24;
-    }
-
-    /**
-     * Convert hourly interests rate to annually.
-     *
-     * @param {number} rate - The hourly rate.
-     * @returns {number} - The annually rate.
-     */
-    getAPY (rate) {
-        return this.getAPD(rate) * 365.2422;
-    }
-
-    /**
-     * Convert hourly interests rate to monthly.
-     *
-     * @param {number} rate - The hourly rate.
-     * @returns {number} - The monthly rate.
-     */
-    getAPM (rate) {
-        return this.getAPY(rate) / 12;
+    getMarketsAsset (markets, coin) {
+        const { fiatAssets } = this.opts;
+        if (fiatAssets.indexOf(coin) < 0) {
+            const asset = markets.find(k => k.baseCurrency === coin && fiatAssets.indexOf(k.quoteCurrency) >= 0);
+            asset.pricePrecision = countDecimals(asset.priceIncrement);
+            return asset;
+        }
+        else {
+            return { coin, price: 1, priceIncrement: 0.0001 };
+        }
     }
 
 }

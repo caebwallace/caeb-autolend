@@ -17,7 +17,7 @@ class CaebAutolend {
         }, _opts);
 
         // Local logging
-        this.log = Logger.create('AUTOLEND');
+        this.log = Logger.create('AUTOLEND [BOT]');
 
     }
 
@@ -35,6 +35,9 @@ class CaebAutolend {
             }
         }
 
+        // Log start sequence
+        this.log.debug('Start');
+
         // Set as running
         this.isRunning = Date.now();
 
@@ -43,7 +46,7 @@ class CaebAutolend {
         const bot = new CaebFTXAutoLend({ ignoreAssets });
         await bot.autolend(bot.opts.ignoreAssets);
 
-        // Log total balance
+        // Log complete sequence
         this.log.debug('Complete');
 
         // Unset running
