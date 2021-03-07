@@ -3,6 +3,7 @@ import ENV from '../helpers/env/env.js';
 import { Logger } from '../helpers/logger/logger.js';
 import { roundTo, countDecimals } from '@helpers/numbers/numbers.js';
 import { convertHPYtoAPY, convertAPYtoHPY, applyRateDiscount } from '../helpers/yield/convert.js';
+import { roundToCeil } from '../helpers/numbers/numbers.js';
 
 /**
  * FTX Auto lending tokens in spot.
@@ -37,7 +38,7 @@ export class CaebFTXAutoLend {
 
             // Min available value in USD
             minAvailableLimitUSD: 0.1,
-            lendPricePrecision: 8,
+            lendPricePrecision: 12,
 
         }, _opts);
 
@@ -206,7 +207,7 @@ export class CaebFTXAutoLend {
                 const m = balances[i];
 
                 // Get env
-                const { lendable, coin, minRate, locked } = m;
+                const { lendable, coin, locked } = m;
                 const { estimate: estimatedRate } = rates.find(k => k.coin === coin);
                 const offerDiscount = ENV.APY_OFFER_DISCOUNT || 0;
 
@@ -231,7 +232,7 @@ export class CaebFTXAutoLend {
                 if (availableUSD >= minAvailableLimitUSD && HPY > 0) {
 
                     // Limit the size to 1% of the total lendable amount
-                    const size = roundTo(available * lendSizeRatio, lendPricePrecision);
+                    const size = roundToCeil(available * lendSizeRatio, lendPricePrecision);
 
                     // Build datas
                     const data = { coin, size, rate: HPY };

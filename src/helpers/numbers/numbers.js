@@ -119,6 +119,21 @@ export function roundTo (n, decimals = 2) {
 }
 
 /**
+ * Round a string or a number to specified decimals a ceiled.
+ *
+ * @exports helpers/numbers/roundTo
+ * @param {number|string} n - The number to round to.
+ * @param {number} decimals - The decimals to keep.
+ * @returns {number} - The parsed number.
+ * @example
+ * roundToCeil('238.98', 2);
+ */
+export function roundToCeil (n, decimals = 2) {
+    const decimalsDivide = Math.pow(10, decimals);
+    return Math.floor(parseFloat(n) * decimalsDivide) / decimalsDivide;
+}
+
+/**
  * Round a string or a number to specified decimals and returns a string.
  *
  * @exports helpers/numbers/roundTo
@@ -149,6 +164,13 @@ export function scale (x, inMin, inMax, outMin, outMax) {
     return (x - inMin) * (outMax - outMin) / (inMax - inMin) + outMin;
 }
 
+/**
+ * If value sended is nan or undefined, returns the second param.
+ *
+ * @param {number} x - The value to check.
+ * @param {number} y - The replacement value if first is null.
+ * @returns {number} - The best matching result between x & y.
+ */
 export function nz (x, y) {
     return _.isNaN(x) || _.isUndefined(x) ? y : x;
 }
