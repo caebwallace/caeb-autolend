@@ -4,6 +4,7 @@ import { Logger } from '../helpers/logger/logger.js';
 import { roundTo, countDecimals } from '@helpers/numbers/numbers.js';
 import { convertHPYtoAPY, convertAPYtoHPY, applyRateDiscount } from '../helpers/yield/convert.js';
 import { roundToCeil } from '../helpers/numbers/numbers.js';
+import { timeout } from '../helpers/utils/timeout.js';
 
 /**
  * FTX Auto lending tokens in spot.
@@ -38,12 +39,15 @@ export class CaebFTXAutoLend {
 
             // Min available value in USD
             minAvailableLimitUSD: 0.1,
-            lendPricePrecision: 12,
+            lendPricePrecision: 8,
+
+            // Pause after submitting offer
+            pauseAfterSubmit: 2000,
 
         }, _opts);
 
         // Local logging
-        this.log = Logger.create('AUTOLEND [FTX]');
+        this.log = Logger.create('[FTX]');
 
     }
 
@@ -90,6 +94,62 @@ export class CaebFTXAutoLend {
         const { result } = await this.api().request({
             method: 'GET',
             path: '/wallet/balances',
+        });
+
+        // Returns results
+        return result;
+
+    }
+
+    /** Returns the lists of leveraged tokens.
+     *
+     * @returns {Array} - The assets balances.
+     */
+    async getLeveragedTokens () {
+
+        // Build the request
+        const { result } = await this.api().request({
+            method: 'GET',
+            path: '/lt/tokens',
+        });
+
+        // Returns results
+        return result;
+
+    }
+
+    /**
+     * Convert an asset to another.
+     *
+     * @param {string} fromCoin - The coin to convert from.
+     * @param {string} toCoin - The coin to convert in.
+     * @param {number} size - The qty of fromCoin to convert.
+     * @returns {object} - The response.
+     */
+    async convertQuoteRequest (fromCoin, toCoin, size) {
+
+        // Build the request
+        const { result } = await this.api().request({
+            method: 'POST',
+            path: '/otc/quotes',
+            data: { fromCoin, toCoin, size },
+        });
+
+        console.log(result);
+    }
+
+    /**
+     * Returns informations on a convert request.
+     *
+     * @param {number} quoteId - The quoteId to get status.
+     * @returns {object} - The response.
+     */
+    async converQuoteStatus (quoteId) {
+
+        // Build the request
+        const { result } = await this.api().request({
+            method: 'GET',
+            path: `/otc/quotes/${quoteId}`,
         });
 
         // Returns results
@@ -171,7 +231,7 @@ export class CaebFTXAutoLend {
             });
 
             // Log it
-            this.log.info(`ADD LENDING -> ${size} [${coin}] (APY : ${roundTo(convertHPYtoAPY(rate) * 100)}%)`);
+            this.log.info(`ADD LENDING [${coin}] -> ${size} (APY : ${roundTo(convertHPYtoAPY(rate) * 100)}%)`);
         }
 
         // Catch errors
@@ -181,7 +241,33 @@ export class CaebFTXAutoLend {
     }
 
     /**
-     * Autolend coins.
+     * Cancel offer on non locked assets.
+     *
+     * @param {object} coin - The offer to cancel.
+     */
+    async cancelLendingOffer (coin) {
+        this.log.debug(`Cancel offer for ${coin}`);
+        await this.submitLendingOffer({
+            coin,
+            size: 0,
+            rate: 0,
+        });
+        await timeout(500);
+    }
+
+    /**
+     * Autolend, but in extreme mode : looks for more valuable profits asset and convert all possible assets to the more rentable one in the next hour.
+     * WARNING : as you can read in README.md, ABOUT BI_COLLATERAL LOSTS, you can loose money by using this feature.
+     * ----------------------------------------------------------------------
+     * PLEASE BE CONSCIENT THAT WE'RE NOT ALWAYS IN BULL MARKET AND TAKE CARE.
+     * ----------------------------------------------------------------------
+     */
+    async extremeLendRateConverter () {
+
+    }
+
+    /**
+     * Autolend assets in wallet.
      *
      * @param {Array} ignoreAssets - The list of assets to ignore (default: none).
      */
@@ -194,10 +280,10 @@ export class CaebFTXAutoLend {
         const markets = await this.getMarkets();
 
         // Get invest ratio for each call
-        const { lendSizeRatio, apyMin, minAvailableLimitUSD, lendPricePrecision } = this.opts;
+        const { lendSizeRatio, apyMin, minAvailableLimitUSD, lendPricePrecision, pauseAfterSubmit } = this.opts;
 
         // Log
-        this.log.info('Ask for autolending assets...');
+        this.log.debug('-- AUTO LENDING ASSETS --');
 
         // Loop over each lendable coins and post an offer
         if (balances && balances.length) {
@@ -213,6 +299,9 @@ export class CaebFTXAutoLend {
 
                 // Get asset
                 const asset = this.getMarketsAsset(markets, coin);
+
+                // Cancel offer for non locked assets
+                // await this.cancelLendingOffer(coin);
 
                 // Get available value to lend
                 const available = lendable - locked;
@@ -250,19 +339,26 @@ export class CaebFTXAutoLend {
 
         }
 
+        // Mark a pause in order to have lending balances up to date
+        this.log.debug('-- WAITING FOR FTX EXECUTION --');
+        await timeout(pauseAfterSubmit);
+
         // Show a fresh list a coins
+        this.log.debug('-- CURRENT LEND BALANCES --');
         const list = await this.getLendingBalances();
         let totalValue = 0;
         list.forEach(k => {
 
             // Calculate some ratios
+            k.lendable = roundToCeil(k.lendable, lendPricePrecision);
+            k.locked = roundToCeil(k.locked, lendPricePrecision);
+            k.offered = roundToCeil(k.offered, lendPricePrecision);
             k.minRate = roundTo(convertHPYtoAPY(k.minRate) * 100);
-            k.lockedRatio = roundTo(k.locked * 100 / k.lendable);
-            k.lendedRatio = roundTo((k.locked - k.offered) * 100 / k.locked);
+            k.lockedRatio = roundTo(k.locked * 100 / k.lendable, 2);
+            k.lendedRatio = roundTo((k.locked - k.offered) * 100 / k.locked, 2);
 
             // Calculate the value in USD
-            const { coin } = k;
-            const { price } = this.getMarketsAsset(markets, coin);
+            const { price } = this.getMarketsAsset(markets, k.coin);
             k.value = k.locked * price;
 
             // Accumulate to totalValue
@@ -304,6 +400,7 @@ export class CaebFTXAutoLend {
         // this.log.debug('History', markets);
 
         // Log profits
+        this.log.debug('-- SUMMARY --');
         this.log.info(`Total lended : ${roundTo(totalValue, 3)} USD`);
         this.log.info(`Total profits : ${roundTo(totalProfits, 3)} USD (${roundTo(totalProfits * 100 / totalValue, 4)}%) - History : ${history.length}`);
 

@@ -17,7 +17,7 @@ class CaebAutolend {
         }, _opts);
 
         // Local logging
-        this.log = Logger.create('AUTOLEND [BOT]');
+        this.log = Logger.create('[BOT]');
 
     }
 

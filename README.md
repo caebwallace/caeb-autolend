@@ -14,7 +14,7 @@ How to use
 
 With nodeJS :
 
- - You need Nod1JS (a decent version > 10.0).
+ - You need NodeJS (a decent version > 10.0).
  - You copy the file `.env.defaults` to `.env` and configure your accounts.
  - You customize your FTX API keys in `.env`
  - Install dependencies with `npm install`
