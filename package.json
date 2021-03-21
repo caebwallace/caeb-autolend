@@ -1,7 +1,7 @@
 {
   "name": "caeb-autolend",
-  "version": "0.1.8",
-  "description": "FTX Auto lending crypto hold in spot.",
+  "version": "0.1.10",
+  "description": "FTX Auto lending assets Bot.",
   "main": "src/index.js",
   "scripts": {
     "start": "babel-node ./src/index.js",
@@ -14,6 +14,10 @@
     "crypto",
     "ftx"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/caebwallace/caeb-autolend.git"
+  },
   "author": "Caeb WALLACE",
   "license": "ISC",
   "dependencies": {
@@ -22,11 +26,14 @@
     "@babel/node": "^7.10.5",
     "@babel/register": "^7.11.5",
     "@babel/runtime": "^7.11.2",
+    "cli-table": "^0.3.5",
     "dotenv-defaults": "^2.0.1",
     "ftx-api-rest": "^0.0.7",
-    "lodash": "^4.17.20",
+    "kleur": "^3.0.3",
+    "lodash": "^4.17.21",
     "logplease": "^1.2.15",
-    "moment": "^2.27.0"
+    "moment": "^2.27.0",
+    "readjson": "^2.2.2"
   },
   "devDependencies": {
     "@babel/eslint-parser": "^7.11.5",

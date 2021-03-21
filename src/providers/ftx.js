@@ -1,10 +1,13 @@
+import _ from 'lodash';
+import moment from 'moment';
 import FTXRest from 'ftx-api-rest';
 import ENV from '../helpers/env/env.js';
 import { Logger } from '../helpers/logger/logger.js';
 import { roundTo, countDecimals } from '@helpers/numbers/numbers.js';
 import { convertHPYtoAPY, convertAPYtoHPY, applyRateDiscount } from '../helpers/yield/convert.js';
-import { roundToCeil } from '../helpers/numbers/numbers.js';
+import { nz, roundToCeil } from '../helpers/numbers/numbers.js';
 import { timeout } from '../helpers/utils/timeout.js';
+import Table from 'cli-table';
 
 /**
  * FTX Auto lending tokens in spot.
@@ -37,12 +40,16 @@ export class CaebFTXAutoLend {
             // Fiat assets
             fiatAssets: ['USD', 'USDT'],
 
+            // Tolerance limit until the offer is updated to the best rate (in %)
+            // -> if the current offer diverge from the market one, the offer is canceled and submited with an adjusted rate.
+            renewOfferTolerance: 0.1,
+
             // Min available value in USD
             minAvailableLimitUSD: 0.1,
             lendPricePrecision: 8,
 
             // Pause after submitting offer
-            pauseAfterSubmit: 2000,
+            pauseAfterSubmit: 5000,
 
         }, _opts);
 
@@ -178,9 +185,10 @@ export class CaebFTXAutoLend {
     /**
      * Returns actual offers on lending.
      *
+     * @param {Array} ignoreAssets - The list of assets to ignore.
      * @returns {Array} - The lending offers.
      */
-    async getLendingBalances () {
+    async getLendingBalances (ignoreAssets) {
 
         // Build the request
         const { result } = await this.api().request({
@@ -189,7 +197,7 @@ export class CaebFTXAutoLend {
         });
 
         // Returns results
-        return result;
+        return result.filter(k => ignoreAssets.indexOf(k.coin) < 0);
 
     }
 
@@ -221,8 +229,6 @@ export class CaebFTXAutoLend {
         // Do it (commented for now)
         try {
 
-            const { coin, size, rate } = data;
-
             // Submit the offer
             await this.api().request({
                 method: 'POST',
@@ -231,7 +237,9 @@ export class CaebFTXAutoLend {
             });
 
             // Log it
+            const { coin, size, rate } = data;
             this.log.info(`ADD LENDING [${coin}] -> ${size} (APY : ${roundTo(convertHPYtoAPY(rate) * 100)}%)`);
+
         }
 
         // Catch errors
@@ -246,7 +254,7 @@ export class CaebFTXAutoLend {
      * @param {object} coin - The offer to cancel.
      */
     async cancelLendingOffer (coin) {
-        this.log.debug(`Cancel offer for ${coin}`);
+        this.log.debug(`CANCEL OFFER [${coin}]`);
         await this.submitLendingOffer({
             coin,
             size: 0,
@@ -275,17 +283,14 @@ export class CaebFTXAutoLend {
 
         // Get balances
         const rates = await this.getLendingRates();
-        const balances = (await this.getLendingBalances()).filter(k => ignoreAssets.indexOf(k.coin) < 0);
-        const history = await this.getLendingHistory();
+        const balances = await this.getLendingBalances(ignoreAssets);
         const markets = await this.getMarkets();
 
         // Get invest ratio for each call
-        const { lendSizeRatio, apyMin, minAvailableLimitUSD, lendPricePrecision, pauseAfterSubmit } = this.opts;
-
-        // Log
-        this.log.debug('-- AUTO LENDING ASSETS --');
+        const { lendSizeRatio, apyMin, minAvailableLimitUSD, lendPricePrecision, renewOfferTolerance } = this.opts;
 
         // Loop over each lendable coins and post an offer
+        let lendingOperations = 0;
         if (balances && balances.length) {
             for (let i = 0; i < balances.length; i++) {
 
@@ -293,7 +298,7 @@ export class CaebFTXAutoLend {
                 const m = balances[i];
 
                 // Get env
-                const { lendable, coin, locked } = m;
+                const { coin, lendable, locked, offered, minRate } = m;
                 const { estimate: estimatedRate } = rates.find(k => k.coin === coin);
                 const offerDiscount = ENV.APY_OFFER_DISCOUNT || 0;
 
@@ -317,6 +322,32 @@ export class CaebFTXAutoLend {
                     return;
                 }
 
+                // Cancel the current offer if locked value but APY is too high compared to the actual market
+                const roundOffered = roundToCeil(offered, lendPricePrecision);
+                const roundLocked = roundToCeil(locked, lendPricePrecision);
+                const roundOfferAPY = roundToCeil(convertHPYtoAPY(minRate) * 100, 2);
+                const roundMarketAPY = roundToCeil(APY * 100, 2);
+                const deltaAPY = Math.abs(roundOfferAPY - roundMarketAPY);
+                // this.log.warn(`OFFER RATE ADJUST [${coin}] ?`, { roundOffered, roundLocked, roundOfferAPY, roundMarketAPY, deltaAPY });
+                if (roundOfferAPY > 0 && deltaAPY > renewOfferTolerance) {
+
+                    // Notification of intention
+                    this.log.warn(`OFFER RATE ADJUST [${coin}] -> RENEW OFFER ${roundOffered} / ${roundLocked}`, {
+                        roundOfferAPY,
+                        roundMarketAPY,
+                        deltaAPY,
+                        renewOfferTolerance,
+                    });
+
+                    // Cancel the lending offer
+                    await this.cancelLendingOffer(coin);
+
+                    // Wait for execution
+                    // await this.waitApiProcessing();
+                    break;
+
+                }
+
                 // If lendable coins and rate is acceptable : call lending
                 if (availableUSD >= minAvailableLimitUSD && HPY > 0) {
 
@@ -329,23 +360,52 @@ export class CaebFTXAutoLend {
                     // Do it (commented for now)
                     await this.submitLendingOffer(data);
 
+                    // Increment operations counter
+                    lendingOperations++;
+
                 }
 
                 // Message if no things to lend
                 else {
                     this.log.debug(`SIZE TOO LOW [${coin}] -> ${roundTo(availableUSD, lendPricePrecision)} USD < ${roundTo(minAvailableLimitUSD, lendPricePrecision)} USD`);
                 }
+
             }
 
         }
 
         // Mark a pause in order to have lending balances up to date
-        this.log.debug('-- WAITING FOR FTX EXECUTION --');
+        // TODO : It's really not optimized, see later if I can watch when lending balances are complete.
+        if (lendingOperations) {
+            await this.waitApiProcessing();
+        }
+
+        // Show history
+        await this.displayHistory({ ignoreAssets, lendPricePrecision, markets });
+
+    }
+
+    /**
+     * Pause to wait for FTX Api processing request.
+     */
+    async waitApiProcessing () {
+        const { pauseAfterSubmit } = this.opts;
+        this.log.debug(`-- WAITING FOR FTX EXECUTION ${pauseAfterSubmit}ms --`);
         await timeout(pauseAfterSubmit);
+    }
+
+    /**
+     * Display history in console as a table.
+     *
+     * @param {object} data - { ignoreAssets, lendPricePrecision, markets }.
+     */
+    async displayHistory (data) {
+
+        // Get datas from params
+        const { lendPricePrecision, ignoreAssets = [], markets = [] } = data;
 
         // Show a fresh list a coins
-        this.log.debug('-- CURRENT LEND BALANCES --');
-        const list = await this.getLendingBalances();
+        const list = await this.getLendingBalances(ignoreAssets);
         let totalValue = 0;
         list.forEach(k => {
 
@@ -354,8 +414,8 @@ export class CaebFTXAutoLend {
             k.locked = roundToCeil(k.locked, lendPricePrecision);
             k.offered = roundToCeil(k.offered, lendPricePrecision);
             k.minRate = roundTo(convertHPYtoAPY(k.minRate) * 100);
-            k.lockedRatio = roundTo(k.locked * 100 / k.lendable, 2);
-            k.lendedRatio = roundTo((k.locked - k.offered) * 100 / k.locked, 2);
+            k.lockedRatio = roundTo(k.locked * 100 / k.lendable, 2) || 0;
+            k.lendedRatio = roundTo((k.locked - k.offered) * 100 / k.locked, 2) || 0;
 
             // Calculate the value in USD
             const { price } = this.getMarketsAsset(markets, k.coin);
@@ -364,19 +424,17 @@ export class CaebFTXAutoLend {
             // Accumulate to totalValue
             totalValue += k.value;
 
-            // Show balances
-            this.log.debug(JSON.stringify(k));
-
         });
 
         // Debug history
-        const pnl = [];
+        // const pnl = [];
         let totalProfits = 0;
+        const history = await this.getLendingHistory();
         history.forEach(h => {
 
             // Get infos
             const { coin, rate: hpy, proceeds, time } = h;
-            const apy = roundTo(convertHPYtoAPY(hpy) * 100);
+            // const apy = roundTo(convertHPYtoAPY(hpy) * 100);
 
             // Get coin price in $ (search for market price, use 1 for fiats)
             const { price } = this.getMarketsAsset(markets, coin);
@@ -385,24 +443,41 @@ export class CaebFTXAutoLend {
             const amount = proceeds * price;
 
             // Push to PNL
-            pnl.push({
-                coin,
-                amount,
-                apy,
-                time,
-            });
+            // pnl.push({
+            //     coin,
+            //     amount,
+            //     apy,
+            //     time,
+            // });
 
             // increment total amount
             totalProfits += amount;
 
-            // console.log(item, h, APY, history.length, price, profits, apy);
         });
-        // this.log.debug('History', markets);
 
-        // Log profits
-        this.log.debug('-- SUMMARY --');
-        this.log.info(`Total lended : ${roundTo(totalValue, 3)} USD`);
-        this.log.info(`Total profits : ${roundTo(totalProfits, 3)} USD (${roundTo(totalProfits * 100 / totalValue, 4)}%) - History : ${history.length}`);
+        // Calculate avg profits
+        const historyDuration = moment(_.first(history).time).valueOf() - moment(_.last(history).time).valueOf();
+        const avgProfits = totalProfits * 1000 * 3600 * 24 / historyDuration;
+
+        // Build the table
+        const table = new Table({
+            head: ['Coin', 'Lendable', 'Locked', 'Offered', 'APY(%)', 'USD'],
+        });
+        list.filter(k => k.lendable > 0).sort((a, b) => a.value < b.value ? 1 : -1).forEach(k => table.push([
+            k.coin,
+            k.lendable,
+            k.locked,
+            k.offered,
+            k.minRate,
+            roundTo(k.value, 3),
+        ]));
+
+        // Add totals
+        table.push(['TOTAL VALUE', '', '', '', '', roundTo(totalValue, 3)]);
+        table.push(['AVG 24H PROFITS', '', '', '', '', roundTo(avgProfits, 3)]);
+
+        // Show the list
+        table.toString().split('\n').forEach(k => this.log.debug(k));
 
     }
 
