@@ -287,7 +287,7 @@ export class CaebFTXAutoLend {
         const markets = await this.getMarkets();
 
         // Debug
-        this.log.debug('LENDABLE COINS', rates);
+        // this.log.debug('LENDABLE COINS', rates);
 
         // Get invest ratio for each call
         const { lendSizeRatio, apyMin, minAvailableLimitUSD, lendPricePrecision, renewOfferTolerance } = this.opts;
@@ -301,8 +301,7 @@ export class CaebFTXAutoLend {
                 const m = balances[i];
 
                 // Get env
-                const { coin } = m;
-                let { lendable, locked, offered, minRate } = m;
+                const { coin, lendable, locked, offered, minRate } = m;
                 const { estimate: estimatedRate } = rates.find(k => k.coin === coin);
                 const offerDiscount = ENV.APY_OFFER_DISCOUNT || 0;
 
@@ -315,6 +314,7 @@ export class CaebFTXAutoLend {
                 // Get available value to lend
                 const available = lendable - locked;
                 const availableUSD = available * asset.price;
+                const lendableUSD = lendable * asset.price;
 
                 // Calculate the offer rate (take the market ones if better than our)
                 const HPY = ENV.APY_MANUAL_FIXED ? convertAPYtoHPY(ENV.APY_MANUAL_FIXED / 100) : applyRateDiscount(estimatedRate, offerDiscount);
@@ -327,8 +327,9 @@ export class CaebFTXAutoLend {
                 }
 
                 // Cancel the current offer if locked value but APY is too high compared to the actual market
-                const roundOffered = roundToCeil(offered, lendPricePrecision);
-                const roundLocked = roundToCeil(locked, lendPricePrecision);
+                let roundLendable = roundToCeil(lendable, lendPricePrecision);
+                let roundOffered = roundToCeil(offered, lendPricePrecision);
+                let roundLocked = roundToCeil(locked, lendPricePrecision);
                 const roundOfferAPY = roundToCeil(convertHPYtoAPY(minRate) * 100, 2);
                 const roundMarketAPY = roundToCeil(APY * 100, 2);
                 const deltaAPY = Math.abs(roundOfferAPY - roundMarketAPY);
@@ -351,15 +352,17 @@ export class CaebFTXAutoLend {
 
                     // Refresh balances for that coin
                     const freshBalance = (await this.getLendingBalances(ignoreAssets)).find(k => k.coin === coin);
-                    lendable = freshBalance.lendable;
-                    locked = freshBalance.locked;
-                    offered = freshBalance.offered;
-                    minRate = freshBalance.minRate;
+                    roundLendable = roundToCeil(freshBalance.lendable, lendPricePrecision);
+                    roundOffered = roundToCeil(freshBalance.offered, lendPricePrecision);
+                    roundLocked = roundToCeil(freshBalance.locked, lendPricePrecision);
 
                 }
 
                 // If lendable coins and rate is acceptable : call lending
-                if (availableUSD >= minAvailableLimitUSD && HPY > 0) {
+                if (lendableUSD >= minAvailableLimitUSD && HPY > 0 && roundLendable > roundOffered) {
+
+                    // Log
+                    this.log.debug(`LENDABLE DIFF [${coin}] -> ${(roundLendable - roundOffered)}`);
 
                     // Limit the size to 1% of the total lendable amount
                     const size = roundToCeil(lendable * lendSizeRatio, lendPricePrecision);
@@ -443,7 +446,7 @@ export class CaebFTXAutoLend {
         history.forEach(h => {
 
             // Get infos
-            const { coin, rate: hpy, proceeds, time } = h;
+            const { coin, proceeds } = h;
             // const apy = roundTo(convertHPYtoAPY(hpy) * 100);
 
             // Get coin price in $ (search for market price, use 1 for fiats)
