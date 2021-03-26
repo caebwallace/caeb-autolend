@@ -2,7 +2,7 @@ import { Logger } from './helpers/logger/logger.js';
 import { DEBUG_DATE } from './helpers/date/date.js';
 import { CaebFTXAutoLend } from './providers/ftx.js';
 import ENV from './helpers/env/env.js';
-import { BANNER_DISCLAIMER, BREAKLINE, RL } from './helpers/banner/banner.js';
+import { BANNER_DISCLAIMER, BREAKLINE } from './helpers/banner/banner.js';
 import { getPackageInfos } from './helpers/package/package.js';
 import { bold, cyan, gray } from 'kleur';
 

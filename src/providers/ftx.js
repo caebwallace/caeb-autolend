@@ -5,7 +5,7 @@ import ENV from '../helpers/env/env.js';
 import { Logger } from '../helpers/logger/logger.js';
 import { roundTo, countDecimals } from '@helpers/numbers/numbers.js';
 import { convertHPYtoAPY, convertAPYtoHPY, applyRateDiscount } from '../helpers/yield/convert.js';
-import { nz, roundToCeil } from '../helpers/numbers/numbers.js';
+import { roundToCeil } from '../helpers/numbers/numbers.js';
 import { timeout } from '../helpers/utils/timeout.js';
 import Table from 'cli-table';
 
@@ -344,6 +344,8 @@ export class CaebFTXAutoLend {
 
                     // Wait for execution
                     // await this.waitApiProcessing();
+
+                    // Refresh
                     break;
 
                 }
@@ -352,7 +354,7 @@ export class CaebFTXAutoLend {
                 if (availableUSD >= minAvailableLimitUSD && HPY > 0) {
 
                     // Limit the size to 1% of the total lendable amount
-                    const size = roundToCeil(available * lendSizeRatio, lendPricePrecision);
+                    const size = roundToCeil(lendable * lendSizeRatio, lendPricePrecision);
 
                     // Build datas
                     const data = { coin, size, rate: HPY };
