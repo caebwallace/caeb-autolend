@@ -286,6 +286,9 @@ export class CaebFTXAutoLend {
         const balances = await this.getLendingBalances(ignoreAssets);
         const markets = await this.getMarkets();
 
+        // Debug
+        this.log.debug('LENDABLE COINS', rates);
+
         // Get invest ratio for each call
         const { lendSizeRatio, apyMin, minAvailableLimitUSD, lendPricePrecision, renewOfferTolerance } = this.opts;
 
