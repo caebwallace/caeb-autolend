@@ -238,7 +238,12 @@ export class CaebFTXAutoLend {
 
             // Log it
             const { coin, size, rate } = data;
-            this.log.info(`ADD LENDING [${coin}] -> ${size} (APY : ${roundTo(convertHPYtoAPY(rate) * 100)}%)`);
+            if (size) {
+                this.log.info(`ADD LENDING [${coin}] -> ${size} (APY : ${roundTo(convertHPYtoAPY(rate) * 100)}%)`);
+            }
+            else {
+                this.log.info(`CANCEL LENDING [${coin}] -> ${size}`);
+            }
 
         }
 
@@ -329,7 +334,7 @@ export class CaebFTXAutoLend {
                 // Cancel the current offer if locked value but APY is too high compared to the actual market
                 let roundLendable = roundToCeil(lendable, lendPricePrecision);
                 let roundOffered = roundToCeil(offered, lendPricePrecision);
-                let roundLocked = roundToCeil(locked, lendPricePrecision);
+                // let roundLocked = roundToCeil(locked, lendPricePrecision);
                 const roundOfferAPY = roundToCeil(convertHPYtoAPY(minRate) * 100, 2);
                 const roundMarketAPY = roundToCeil(APY * 100, 2);
                 const deltaAPY = Math.abs(roundOfferAPY - roundMarketAPY);
@@ -337,7 +342,9 @@ export class CaebFTXAutoLend {
                 if (roundOfferAPY > 0 && deltaAPY > renewOfferTolerance) {
 
                     // Notification of intention
-                    this.log.warn(`OFFER RATE ADJUST [${coin}] -> RENEW OFFER ${roundOffered} / ${roundLocked}`, {
+                    this.log.warn(`OFFER RATE ADJUST [${coin}] -> RENEW OFFER`, {
+                        roundLendable,
+                        roundOffered,
                         roundOfferAPY,
                         roundMarketAPY,
                         deltaAPY,
@@ -354,7 +361,7 @@ export class CaebFTXAutoLend {
                     const freshBalance = (await this.getLendingBalances(ignoreAssets)).find(k => k.coin === coin);
                     roundLendable = roundToCeil(freshBalance.lendable, lendPricePrecision);
                     roundOffered = roundToCeil(freshBalance.offered, lendPricePrecision);
-                    roundLocked = roundToCeil(freshBalance.locked, lendPricePrecision);
+                    // roundLocked = roundToCeil(freshBalance.locked, lendPricePrecision);
 
                 }
 
