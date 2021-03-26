@@ -298,7 +298,8 @@ export class CaebFTXAutoLend {
                 const m = balances[i];
 
                 // Get env
-                const { coin, lendable, locked, offered, minRate } = m;
+                const { coin } = m;
+                let { lendable, locked, offered, minRate } = m;
                 const { estimate: estimatedRate } = rates.find(k => k.coin === coin);
                 const offerDiscount = ENV.APY_OFFER_DISCOUNT || 0;
 
@@ -343,10 +344,14 @@ export class CaebFTXAutoLend {
                     await this.cancelLendingOffer(coin);
 
                     // Wait for execution
-                    // await this.waitApiProcessing();
+                    await this.waitApiProcessing();
 
-                    // Refresh
-                    break;
+                    // Refresh balances for that coin
+                    const freshBalance = (await this.getLendingBalances(ignoreAssets)).find(k => k.coin === coin);
+                    lendable = freshBalance.lendable;
+                    locked = freshBalance.locked;
+                    offered = freshBalance.offered;
+                    minRate = freshBalance.minRate;
 
                 }
 
