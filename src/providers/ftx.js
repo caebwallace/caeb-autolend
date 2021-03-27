@@ -51,10 +51,13 @@ export class CaebFTXAutoLend {
             // Pause after submitting offer
             pauseAfterSubmit: 5000,
 
+            // The version of the script
+            version: '0.0.0',
+
         }, _opts);
 
         // Local logging
-        this.log = Logger.create('[FTX]');
+        this.log = Logger.create(`[FTX ${this.opts.version}]`);
 
     }
 

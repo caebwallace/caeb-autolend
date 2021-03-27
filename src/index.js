@@ -17,10 +17,11 @@ class CaebAutolend {
             updateInterval: INTERVAL_CHECK_MIN ? INTERVAL_CHECK_MIN * 60 * 1000 : 60000,
             updateErrorResetAfterCount: 10,
             ignoreAssets: (IGNORE_ASSETS || '').split(','),
+            version: '0.0.0',
         }, _opts);
 
         // Local logging
-        this.log = Logger.create('[BOT]');
+        this.log = Logger.create(`[BOT ${this.opts.version}]`);
 
     }
 
@@ -45,7 +46,7 @@ class CaebAutolend {
 
         // Call operations
         const { ignoreAssets } = this.opts;
-        const bot = new CaebFTXAutoLend({ ignoreAssets });
+        const bot = new CaebFTXAutoLend({ ignoreAssets, version: this.opts.version });
         await bot.autolend(bot.opts.ignoreAssets);
 
         // Log complete sequence
@@ -72,8 +73,13 @@ class CaebAutolend {
 // -------------------- START THE PRODUCT --------------------
 (async function () {
 
+    // Get package infos
+    const pck = await getPackageInfos();
+
     // Instanciate a dashboard
-    const product = new CaebAutolend();
+    const product = new CaebAutolend({
+        version: pck.version,
+    });
 
     // Display the banner
     await product.displayBanner();
