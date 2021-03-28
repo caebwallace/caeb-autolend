@@ -58,7 +58,12 @@ That section is to configure all assets in one.
 
 **Individual asset config**
 
-That section is to configure each asset individually
+That section is to configure each asset individually.
+
+PLEASE BE VERY CAREFULL WITH AUTO CONVERT FEATURE : you can have fees and if you're in a bear market, the user will borrow your asset to short it.
+=> So you'll earn a little amount of asset, but the price will go down, so your balance will be negative.
+
+**I RECOMMEND TO DISABLE THAT FEATURE AND USE IT AT YOUR OWN RISKS**
 
 ```
 "assets": {

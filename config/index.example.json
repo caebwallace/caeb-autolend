@@ -16,13 +16,13 @@
             "discount": 1,
             "investRatio": 50,
             "rate": null,
-            "convert": ["USDT"]
+            "convert": null
         },
         "USDT": {
             "discount": 1,
             "investRatio": 50,
             "rate": null,
-            "convert": ["USD"]
+            "convert": null
         },
         "GME": {
             "ignore": true
