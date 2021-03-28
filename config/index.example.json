@@ -1,8 +1,8 @@
 {
     "account": {
-        "apiKey": "",
-        "apiSecret": "",
-        "subaccountId": ""
+        "apiKey": "PROVIDE YOUR FTX API KEY",
+        "apiSecret": "PROVIDE YOUR FTX API SECRET",
+        "subaccountId": null
     },
     "general": {
         "investRatio": 100,

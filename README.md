@@ -38,7 +38,7 @@ Optionallu, you can specify a subaccount nicke name with `subaccountId`.
 "account": {
     "apiKey": "",
     "apiSecret": "",
-    "subaccountId": ""
+    "subaccountId": null
 }
 ```
 
