@@ -36,8 +36,8 @@ Optionallu, you can specify a subaccount nicke name with `subaccountId`.
 
 ```
 "account": {
-    "apiKey": "",
-    "apiSecret": "",
+    "apiKey": "PROVIDE YOUR FTX API KEY",
+    "apiSecret": "PROVIDE YOUR FTX API SECRET",
     "subaccountId": null
 }
 ```
