@@ -15,8 +15,8 @@ How to use
 With nodeJS :
 
  - You need NodeJS (a decent version > 10.0).
- - You copy the file `.env.defaults` to `.env` and configure your accounts.
- - You customize your FTX API keys in `.env`
+ - You copy the file `/config/index.example.json` to `/config/index.json` and configure your accounts.
+ - You customize your FTX API keys and other confi params in `/config/index.json`
  - Install dependencies with `npm install`
  - Start it with `npm start`
 
@@ -26,40 +26,48 @@ With nodeJS :
  - To to 'Running with Docker' to build and run the image.
 
 
-Configuration
+Configuration `/config/index.json`
 -------------
 
-**The default configuration is set to not working without changing config.**
+**FTX Account**
 
-FTX API keys are of course concerned, but below you've the configuration to apply for invest ratio (INVEST_RATIO) and APY minimum (APY_MIN).
-
-- INVEST_RATIO : `1` means that 100% (0.1 -> 10%...) of the lending elligibles tokens will be lend.
-- APY_MIN : the lowest APY you accept in %.
+`apiKey` and `apiSecret` are required.
+Optionallu, you can specify a subaccount nicke name with `subaccountId`.
 
 ```
-# Your FTX API Key
-FTX_API_KEY=XXXX
+"account": {
+    "apiKey": "",
+    "apiSecret": "",
+    "subaccountId": ""
+}
+```
 
-# Your FTX API Secret
-FTX_API_SECRET=XXXX
+**All Assets Config**
 
-# INTERVAL BETWEEN EACH CHECK (in minutes)
-INTERVAL_CHECK_MIN=1
+That section is to configure all assets in one.
 
-# The amount to invest of available coins at each call (set as 1 to transfer all spot to lending)
-INVEST_RATIO=1
+```
+"general": {
+    "investRatio": 100,                 // In %, the ratio of your asset amount to lend (100 USDT with a investRatio at 50, will lend and lock 50 USDT for one hour)
+    "apyMin": 0,                        // The min APY to accept (default: 0)
+    "discount": 1,                      // In %, the discount to apply compared to the market (if the market APY is 10%, we will offer 9.9% to be sure to lend asset)
+    "allowCoinConversion": true,        // Allow to convert coin into another, based on a user defined list that choose the best yield
+    "fiatAssets": ["USD", "USDT"]       // Define assets that are considered as FIAT
+}
+```
 
-# The minimum of APY% asked
-APY_MIN=5
+**Individual asset config**
 
-# Set the APY% manually (disable APY_MIN)
-APY_MANUAL_FIXED=
+That section is to configure each asset individually
 
-# The reduction % compared to the estimated one (to be sure to be choosed)
-APY_OFFER_DISCOUNT=0
-
-# Ignore those assets from auto lending (seperated with a comma)
-IGNORE_ASSETS=FAKE,COIN
+```
+"assets": {
+    "USD": {
+        "discount": 1,                    // The discount to apply for that asset
+        "investRatio": 100,               // The total amount of your asset to lend
+        "convert": ["USDT"]               // Allow to convert USD to USDT if USDT perf is better (doesn't convert otherway, you've to configure USDT -> USD)
+    }
+}
 ```
 
 Running with Docker

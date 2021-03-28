@@ -1,13 +1,13 @@
 import _ from 'lodash';
 import moment from 'moment';
 import FTXRest from 'ftx-api-rest';
-import ENV from '../helpers/env/env.js';
 import { Logger } from '../helpers/logger/logger.js';
 import { roundTo, countDecimals } from '@helpers/numbers/numbers.js';
 import { convertHPYtoAPY, convertAPYtoHPY, applyRateDiscount } from '../helpers/yield/convert.js';
 import { roundToCeil } from '../helpers/numbers/numbers.js';
 import { timeout } from '../helpers/utils/timeout.js';
 import Table from 'cli-table';
+import readjson from 'readjson';
 
 /**
  * FTX Auto lending tokens in spot.
@@ -21,24 +21,33 @@ export class CaebFTXAutoLend {
      */
     constructor (_opts = {}) {
 
+        // Read the config file
+        const { account, general, assets } = readjson.sync.try(`${process.cwd()}/config/index.json`);
+
         // Setup defaults options
-        const { FTX_API_KEY, FTX_API_SECRET, FTX_SUBACCOUNT_ID, INVEST_RATIO, APY_MIN } = ENV;
         this.opts = Object.assign({
 
             // FTX Account
-            apiKey: FTX_API_KEY,
-            apiSecret: FTX_API_SECRET,
-            subaccountId: FTX_SUBACCOUNT_ID,
+            apiKey: account.apiKey,
+            apiSecret: account.apiSecret,
+            subaccountId: account.subaccountId,
 
-            // % of the total lendable amount to lend (from 0 to 1)
-            lendSizeRatio: INVEST_RATIO,
-            apyMin: APY_MIN,
+            // % of the total lendable amount to lend
+            genericInvestRatio: general.investRatio,
+            genericApyMin: general.apyMin,
+            genericDiscount: general.discount,
+
+            // Convert Assets for better perf
+            allowCoinConversion: general.allowCoinConversion === true,
+
+            // Assets specific configuration
+            assets,
 
             // Assets to ignore
-            ignoreAssets: [],
+            ignoreAssets: (Object.keys(assets) || []).filter(coin => assets[coin] && assets[coin].ignore === true),
 
             // Fiat assets
-            fiatAssets: ['USD', 'USDT'],
+            fiatAssets: general.fiatAssets || ['USDT', 'USD'],
 
             // Tolerance limit until the offer is updated to the best rate (in %)
             // -> if the current offer diverge from the market one, the offer is canceled and submited with an adjusted rate.
@@ -57,7 +66,10 @@ export class CaebFTXAutoLend {
         }, _opts);
 
         // Local logging
-        this.log = Logger.create(`[FTX ${this.opts.version}]`);
+        this.log = Logger.create('[FTX]');
+
+        // Wait for unlocking coin
+        this.waitUnlocked = [];
 
     }
 
@@ -138,6 +150,9 @@ export class CaebFTXAutoLend {
      */
     async convertQuoteRequest (fromCoin, toCoin, size) {
 
+        // Log
+        this.log.info(`CONVERT REQUEST [${fromCoin}] (${size}) -> ${toCoin}`);
+
         // Build the request
         const { result } = await this.api().request({
             method: 'POST',
@@ -145,7 +160,8 @@ export class CaebFTXAutoLend {
             data: { fromCoin, toCoin, size },
         });
 
-        console.log(result);
+        // Returns results with quoteId
+        return result;
     }
 
     /**
@@ -154,12 +170,31 @@ export class CaebFTXAutoLend {
      * @param {number} quoteId - The quoteId to get status.
      * @returns {object} - The response.
      */
-    async converQuoteStatus (quoteId) {
+    async convertQuoteStatus (quoteId) {
 
         // Build the request
         const { result } = await this.api().request({
             method: 'GET',
             path: `/otc/quotes/${quoteId}`,
+        });
+
+        // Returns results
+        return result;
+
+    }
+
+    /**
+     * Confirms a quote conversion.
+     *
+     * @param {number} quoteId - The quoteId to confirm.
+     * @returns {object} - The response.
+     */
+    async convertQuoteConfirm (quoteId) {
+
+        // Build the request
+        const { result } = await this.api().request({
+            method: 'POST',
+            path: `/otc/quotes/${quoteId}/accept`,
         });
 
         // Returns results
@@ -188,10 +223,12 @@ export class CaebFTXAutoLend {
     /**
      * Returns actual offers on lending.
      *
-     * @param {Array} ignoreAssets - The list of assets to ignore.
      * @returns {Array} - The lending offers.
      */
-    async getLendingBalances (ignoreAssets) {
+    async getLendingBalances () {
+
+        // Get the assets to ignore
+        const { ignoreAssets } = this.opts;
 
         // Build the request
         const { result } = await this.api().request({
@@ -280,117 +317,233 @@ export class CaebFTXAutoLend {
      */
     async extremeLendRateConverter () {
 
+        // Get opts
+        const { allowCoinConversion, lendPricePrecision, assets } = this.opts;
+
+        // Skip if not activated
+        if (!allowCoinConversion) {
+            this.log.debug('Skip convert (general.allowCoinConversion === false)');
+            return;
+        }
+
+        // Log it
+        this.log.debug('Try to convert assets to a better perf one...');
+
+        // Get the rates and the list of available balances
+        const markets = await this.getMarkets();
+        const rates = await this.getLendingRates();
+        const balances = await this.getLendingBalances();
+
+        // Look for each asset in balance and test if equivalent has more perf
+        for (const balance of balances) {
+
+            // Get extra balances datas
+            const { coin, lendable, locked, APY, marketAPY } = this.getBalanceExtras(markets, rates, balance);
+            // console.log(this.getBalanceExtras(markets, rates, balance));
+
+            // Skip if lendable amount is null
+            if (lendable > 0) {
+
+                // Get current rate and targets one
+                const balanceRate = rates.find(k => k.coin === coin);
+                const targets = assets[coin] && assets[coin].convert ? assets[coin].convert : null;
+                let maxRate = Object.assign({}, balanceRate);
+
+                // Search for a better yield in targets
+                if (targets && targets.length) {
+
+                    // Find the best perf coin
+                    const targetsRates = targets.map(coin => rates.find(k => k.coin === coin));
+                    for (const targetRate of targetsRates) {
+                        if (targetRate.estimate > maxRate.estimate) {
+                            maxRate = targetRate;
+                        }
+                        // if (targetRate.coin === 'USDT') {
+                        //     maxRate = {
+                        //         coin: 'USDT',
+                        //         estimate: 0.0000226017,
+                        //     };
+                        // }
+                    }
+
+                    // Convert it if different
+                    if (coin !== maxRate.coin) {
+                        try {
+
+                            // Log it
+                            this.log.info(`CONVERT [${coin}] ${lendable} (${roundToCeil(APY * 100, lendPricePrecision)}%) -> ${maxRate.coin} (${convertHPYtoAPY(maxRate.estimate * 100)}%)`);
+
+                            // Cancel the lending offer
+                            await this.cancelLendingOffer(balance.coin);
+
+                            // Convert to the target coin
+                            if (locked === 0) {
+
+                                // Request for a quote conversion
+                                const { quoteId } = await this.convertQuoteRequest(balance.coin, maxRate.coin, balance.lendable);
+
+                                // Display status (even if we validate it just after)
+                                const status = await this.convertQuoteStatus(quoteId);
+                                this.log.info(`CONVERT STATUS [${coin}]`, status);
+
+                                // Confirm the conversion
+                                const results = await this.convertQuoteConfirm(quoteId);
+                                this.log.info(`CONVERT [${coin}]`, results);
+
+                                // Remove protection to enable lending after convert
+                                const waitUnlockedIndex = this.waitUnlocked.indexOf(coin);
+                                if (waitUnlockedIndex >= 0) {
+                                    this.waitUnlocked.splice(waitUnlockedIndex, 1);
+                                }
+
+                            }
+
+                            // Protect coin against being lended again until being unlocked
+                            else if (!this.waitUnlocked.includes(coin)) {
+                                this.log.warn(`CONVERT WAIT UNTIL UNLOCKED [${coin}]`);
+                                this.waitUnlocked.push(coin);
+                            }
+
+                        }
+
+                        catch (err) {
+                            this.log.warn(`CONVERT ERROR [${coin}]`, err);
+                        }
+
+                    }
+
+                    // Skip if same
+                    else {
+                        this.log.info(`NO CONVERT [${coin}] (${roundToCeil(marketAPY, lendPricePrecision)}%) -> Best perf compared to [${targets.join(', ')}]`);
+                    }
+
+                }
+                else {
+                    this.log.debug(`NO CONVERT [${coin}] -> NO TARGETS DEFINED`);
+                }
+
+            }
+
+        }
+
     }
 
     /**
      * Autolend assets in wallet.
-     *
-     * @param {Array} ignoreAssets - The list of assets to ignore (default: none).
      */
-    async autolend (ignoreAssets = []) {
+    async autolend () {
+
+        // Get invest ratio for each call
+        const { apyMin, minAvailableLimitUSD, lendPricePrecision, renewOfferTolerance, ignoreAssets, allowCoinConversion } = this.opts;
+
+        // Check if assets can be converted to a better performance
+        if (allowCoinConversion) {
+            await this.extremeLendRateConverter();
+        }
 
         // Get balances
         const rates = await this.getLendingRates();
-        const balances = await this.getLendingBalances(ignoreAssets);
+        const balances = await this.getLendingBalances();
         const markets = await this.getMarkets();
-
-        // Debug
-        // this.log.debug('LENDABLE COINS', rates);
-
-        // Get invest ratio for each call
-        const { lendSizeRatio, apyMin, minAvailableLimitUSD, lendPricePrecision, renewOfferTolerance } = this.opts;
 
         // Loop over each lendable coins and post an offer
         let lendingOperations = 0;
         if (balances && balances.length) {
-            for (let i = 0; i < balances.length; i++) {
+            for (const balance of balances) {
 
-                // Get the balance
-                const m = balances[i];
+                // Prepare balance improved datas from inputs
+                const datas = this.getBalanceExtras(markets, rates, balance);
 
-                // Get env
-                const { coin, lendable, locked, offered, minRate } = m;
-                const { estimate: estimatedRate } = rates.find(k => k.coin === coin);
-                const offerDiscount = ENV.APY_OFFER_DISCOUNT || 0;
+                // Map constants
+                const {
+                    coin,
+                    rate,
+                    discount,
+                    investRatio,
+                    availableUSD,
+                    lendableUSD,
+                    HPY,
+                    APY,
+                    offerAPY,
+                    marketAPY,
+                    deltaAPY,
+                } = datas;
 
-                // Get asset
-                const asset = this.getMarketsAsset(markets, coin);
+                // Map dunamc vars
+                let {
+                    lendable,
+                    offered,
+                } = datas;
 
-                // Cancel offer for non locked assets
-                // await this.cancelLendingOffer(coin);
+                // Reject if waiting for unlocked
+                if (this.waitUnlocked.includes(coin) && lendable > 0) {
+                    this.log.warn(`WAIT FOR UNLOCKED TO CONVERT [${coin}]`);
+                }
 
-                // Get available value to lend
-                const available = lendable - locked;
-                const availableUSD = available * asset.price;
-                const lendableUSD = lendable * asset.price;
-
-                // Calculate the offer rate (take the market ones if better than our)
-                const HPY = ENV.APY_MANUAL_FIXED ? convertAPYtoHPY(ENV.APY_MANUAL_FIXED / 100) : applyRateDiscount(estimatedRate, offerDiscount);
-                const APY = convertHPYtoAPY(HPY);
+                // Reject if asset is ignored
+                else if (ignoreAssets.includes(coin)) {
+                    this.log.warn(`IGNORING [${coin}]`);
+                }
 
                 // Reject if above APY min
-                if (!ENV.APY_MANUAL_FIXED && lendable > 0 && APY < (apyMin / 100)) {
-                    this.log.warn(`APY TOO LOW [${coin}] -> ${APY * 100} < ${roundTo(apyMin)}%`, estimatedRate, offerDiscount);
-                    return;
+                else if (lendable > 0 && APY < (apyMin / 100)) {
+                    this.log.warn(`APY TOO LOW [${coin}] -> ${APY * 100} < ${roundTo(apyMin)}%`, rate, discount);
                 }
 
-                // Cancel the current offer if locked value but APY is too high compared to the actual market
-                let roundLendable = roundToCeil(lendable, lendPricePrecision);
-                let roundOffered = roundToCeil(offered, lendPricePrecision);
-                // let roundLocked = roundToCeil(locked, lendPricePrecision);
-                const roundOfferAPY = roundToCeil(convertHPYtoAPY(minRate) * 100, 2);
-                const roundMarketAPY = roundToCeil(APY * 100, 2);
-                const deltaAPY = Math.abs(roundOfferAPY - roundMarketAPY);
-                // this.log.warn(`OFFER RATE ADJUST [${coin}] ?`, { roundOffered, roundLocked, roundOfferAPY, roundMarketAPY, deltaAPY });
-                if (roundOfferAPY > 0 && deltaAPY > renewOfferTolerance) {
-
-                    // Notification of intention
-                    this.log.warn(`OFFER RATE ADJUST [${coin}] -> RENEW OFFER`, {
-                        roundLendable,
-                        roundOffered,
-                        roundOfferAPY,
-                        roundMarketAPY,
-                        deltaAPY,
-                        renewOfferTolerance,
-                    });
-
-                    // Cancel the lending offer
-                    await this.cancelLendingOffer(coin);
-
-                    // Wait for execution
-                    await this.waitApiProcessing();
-
-                    // Refresh balances for that coin
-                    const freshBalance = (await this.getLendingBalances(ignoreAssets)).find(k => k.coin === coin);
-                    roundLendable = roundToCeil(freshBalance.lendable, lendPricePrecision);
-                    roundOffered = roundToCeil(freshBalance.offered, lendPricePrecision);
-                    // roundLocked = roundToCeil(freshBalance.locked, lendPricePrecision);
-
-                }
-
-                // If lendable coins and rate is acceptable : call lending
-                if (lendableUSD >= minAvailableLimitUSD && HPY > 0 && roundLendable > roundOffered) {
-
-                    // Log
-                    this.log.debug(`LENDABLE DIFF [${coin}] -> ${(roundLendable - roundOffered)}`);
-
-                    // Limit the size to 1% of the total lendable amount
-                    const size = roundToCeil(lendable * lendSizeRatio, lendPricePrecision);
-
-                    // Build datas
-                    const data = { coin, size, rate: HPY };
-
-                    // Do it (commented for now)
-                    await this.submitLendingOffer(data);
-
-                    // Increment operations counter
-                    lendingOperations++;
-
-                }
-
-                // Message if no things to lend
+                // Continue in other cases
                 else {
-                    this.log.debug(`SIZE TOO LOW [${coin}] -> ${roundTo(availableUSD, lendPricePrecision)} USD < ${roundTo(minAvailableLimitUSD, lendPricePrecision)} USD`);
+
+                    // Cancel the current offer if locked value but APY is too high compared to the actual market
+                    if (offerAPY > 0 && deltaAPY > renewOfferTolerance) {
+
+                        // Notification of intention
+                        this.log.warn(`OFFER RATE ADJUST [${coin}] -> RENEW OFFER`, {
+                            lendable,
+                            offered,
+                            offerAPY,
+                            marketAPY,
+                            deltaAPY,
+                            renewOfferTolerance,
+                        });
+
+                        // Cancel the lending offer
+                        await this.cancelLendingOffer(coin);
+
+                        // Wait for execution
+                        await this.waitApiProcessing();
+
+                        // Refresh balances for that coin
+                        const freshBalance = (await this.getLendingBalances()).find(k => k.coin === coin);
+                        lendable = roundToCeil(freshBalance.lendable, lendPricePrecision);
+                        offered = roundToCeil(freshBalance.offered, lendPricePrecision);
+
+                    }
+
+                    // If lendable coins and rate is acceptable : call lending
+                    if (lendableUSD >= minAvailableLimitUSD && HPY > 0 && lendable > offered) {
+
+                        // Log
+                        this.log.debug(`LENDABLE DIFF [${coin}] -> ${roundToCeil(lendable - offered, lendPricePrecision)}`);
+
+                        // Limit the size to 1% of the total lendable amount
+                        const size = roundToCeil(lendable * investRatio / 100, lendPricePrecision);
+
+                        // Build datas
+                        const data = { coin, size, rate: HPY };
+
+                        // Do it (commented for now)
+                        await this.submitLendingOffer(data);
+
+                        // Increment operations counter
+                        lendingOperations++;
+
+                    }
+
+                    // Message if no things to lend
+                    else {
+                        this.log.debug(`SIZE TOO LOW [${coin}] -> ${roundTo(availableUSD, lendPricePrecision)} USD < ${roundTo(minAvailableLimitUSD, lendPricePrecision)} USD`);
+                    }
+
                 }
 
             }
@@ -404,7 +557,59 @@ export class CaebFTXAutoLend {
         }
 
         // Show history
-        await this.displayHistory({ ignoreAssets, lendPricePrecision, markets });
+        await this.displayHistory({ lendPricePrecision, markets });
+
+    }
+
+    /**
+     * Add and format balance properties.
+     *
+     * @param {Array} markets - The list of all assets in market.
+     * @param {Array} rates - The list of current rates.
+     * @param {object} balance - The balance to fill.
+     * @returns {object} - Returns improved balance.
+     */
+    getBalanceExtras (markets, rates, balance) {
+
+        // Get generic opts
+        const { lendPricePrecision, assets, genericDiscount, genericInvestRatio } = this.opts;
+
+        // Get asset env
+        const { coin, lendable, locked, offered, minRate } = balance;
+        const { estimate: marketRate } = rates.find(k => k.coin === coin);
+        const { discount, investRatio, rate } = assets[coin] || { discount: genericDiscount, investRatio: genericInvestRatio, rate: null };
+        const available = roundToCeil(lendable - locked, lendPricePrecision);
+
+        // Get asset
+        const { price } = this.getMarketsAsset(markets, coin);
+
+        // Choose the target rate
+        const targetRate = rate || marketRate;
+
+        // Returns params
+        const payload = {
+            coin,
+            lendable: roundToCeil(lendable, lendPricePrecision),
+            locked: roundToCeil(locked, lendPricePrecision),
+            offered: roundToCeil(offered, lendPricePrecision),
+            rate: targetRate,
+            marketRate,
+            discount: discount || 0,
+            investRatio: investRatio || 100,
+            available,
+            availableUSD: available * price,
+            lendableUSD: lendable * price,
+            HPY: rate ? convertAPYtoHPY(rate / 100) : applyRateDiscount(targetRate, discount),
+        };
+
+        // Complete payload with extras
+        payload.APY = convertHPYtoAPY(payload.HPY);
+        payload.offerAPY = roundToCeil(convertHPYtoAPY(minRate) * 100, 2);
+        payload.marketAPY = roundToCeil(payload.APY * 100, 2);
+        payload.deltaAPY = roundToCeil(Math.abs(payload.offerAPY - payload.marketAPY), 2);
+
+        // Returns payload generated
+        return payload;
 
     }
 
@@ -425,10 +630,10 @@ export class CaebFTXAutoLend {
     async displayHistory (data) {
 
         // Get datas from params
-        const { lendPricePrecision, ignoreAssets = [], markets = [] } = data;
+        const { lendPricePrecision, markets = [] } = data;
 
         // Show a fresh list a coins
-        const list = await this.getLendingBalances(ignoreAssets);
+        const list = await this.getLendingBalances();
         let totalValue = 0;
         list.forEach(k => {
 
@@ -457,21 +662,12 @@ export class CaebFTXAutoLend {
 
             // Get infos
             const { coin, proceeds } = h;
-            // const apy = roundTo(convertHPYtoAPY(hpy) * 100);
 
             // Get coin price in $ (search for market price, use 1 for fiats)
             const { price } = this.getMarketsAsset(markets, coin);
 
             // Calculate the value
             const amount = proceeds * price;
-
-            // Push to PNL
-            // pnl.push({
-            //     coin,
-            //     amount,
-            //     apy,
-            //     time,
-            // });
 
             // increment total amount
             totalProfits += amount;

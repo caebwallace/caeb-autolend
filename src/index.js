@@ -1,7 +1,6 @@
 import { Logger } from './helpers/logger/logger.js';
 import { DEBUG_DATE } from './helpers/date/date.js';
 import { CaebFTXAutoLend } from './providers/ftx.js';
-import ENV from './helpers/env/env.js';
 import { BANNER_DISCLAIMER, BREAKLINE } from './helpers/banner/banner.js';
 import { getPackageInfos } from './helpers/package/package.js';
 import { bold, cyan, gray } from 'kleur';
@@ -12,16 +11,14 @@ class CaebAutolend {
     constructor (_opts = {}) {
 
         // Extend options
-        const { INTERVAL_CHECK_MIN, IGNORE_ASSETS } = ENV;
         this.opts = Object.assign({
-            updateInterval: INTERVAL_CHECK_MIN ? INTERVAL_CHECK_MIN * 60 * 1000 : 60000,
+            updateInterval: 1 * 60 * 1000,
             updateErrorResetAfterCount: 10,
-            ignoreAssets: (IGNORE_ASSETS || '').split(','),
             version: '0.0.0',
         }, _opts);
 
         // Local logging
-        this.log = Logger.create(`[BOT ${this.opts.version}]`);
+        this.log = Logger.create('[BOT]');
 
     }
 
@@ -45,9 +42,8 @@ class CaebAutolend {
         this.isRunning = Date.now();
 
         // Call operations
-        const { ignoreAssets } = this.opts;
-        const bot = new CaebFTXAutoLend({ ignoreAssets, version: this.opts.version });
-        await bot.autolend(bot.opts.ignoreAssets);
+        const bot = new CaebFTXAutoLend({ version: this.opts.version });
+        await bot.autolend();
 
         // Log complete sequence
         // this.log.debug('Complete');
